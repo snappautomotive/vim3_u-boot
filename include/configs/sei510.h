@@ -23,10 +23,10 @@
 #define PARTS_DEFAULT                                        \
 	"uuid_disk=${uuid_gpt_disk};"  			\
 	"name=boot,size=64M,bootable,uuid=${uuid_gpt_boot};" \
-	"name=cache,size=1120M,uuid=" CACHE_UUID             \
-	"name=system,size=1280M,uuid=" SYSTEM_UUID           \
+	"name=cache,size=256M,uuid=" CACHE_UUID             \
+	"name=system,size=1536M,uuid=" SYSTEM_UUID           \
 	"name=vendor,size=256M,uuid=" VENDOR_UUID            \
-	"name=userdata,size=4138M,uuid=" USERDATA_UUID	\
+	"name=userdata,size=4746M,uuid=" USERDATA_UUID	\
 	"name=rootfs,size=-,uuid=" ROOT_UUID
 
 #define BOOTENV_DEV_FASTBOOT(devtypeu, devtypel, instance) \
