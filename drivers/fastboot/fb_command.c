@@ -38,6 +38,7 @@ static void erase(char *, char *);
 #endif
 static void reboot_bootloader(char *, char *);
 static void reboot_fastboot(char *, char *);
+static void reboot_recovery(char *, char *);
 #if CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_FORMAT)
 static void oem_format(char *, char *);
 #endif
@@ -83,6 +84,10 @@ static const struct {
 	[FASTBOOT_COMMAND_REBOOT_FASTBOOT] =  {
 		.command = "reboot-fastboot",
 		.dispatch = reboot_fastboot
+	},
+	[FASTBOOT_COMMAND_REBOOT_RECOVERY] =  {
+		.command = "reboot-recovery",
+		.dispatch = reboot_recovery
 	},
 	[FASTBOOT_COMMAND_SET_ACTIVE] =  {
 		.command = "set_active",
@@ -339,6 +344,25 @@ static void reboot_fastboot(char *cmd_parameter, char *response)
 
 	if (!s) {
 		fastboot_fail("androidboot_fastbootd not set", response);
+	}
+	if (run_command(s, 0))
+		fastboot_fail("Cannot set reboot flag", response);
+	else
+		fastboot_okay(NULL, response);
+}
+
+/**
+ * reboot_recovery() - Execute bcb command to set reboot reason to boot-recovery,recovery.
+ *
+ * @cmd_parameter: Pointer to command parameter
+ * @response: Pointer to recovery response buffer
+ */
+static void reboot_recovery(char *cmd_parameter, char *response)
+{
+	char *s = env_get("androidboot_recovery");
+
+	if (!s) {
+		fastboot_fail("androidboot_recovery not set", response);
 	}
 	if (run_command(s, 0))
 		fastboot_fail("Cannot set reboot flag", response);
