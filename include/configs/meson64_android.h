@@ -13,10 +13,55 @@
 #define CONFIG_SYS_MMC_ENV_PART	1
 
 
-#define BOOTENV_DEV_FASTBOOT(devtypeu, devtypel, instance) \
+#ifndef BOOT_PARTITION
+#define BOOT_PARTITION "boot"
+#endif
+
+#if defined(CONFIG_CMD_BCB)
+#define ANDROIDBOOT_FASTBOOTD_CMD "androidboot_fastbootd=" \
+	"if bcb load " __stringify(CONFIG_FASTBOOT_FLASH_MMC_DEV) " " \
+		CONTROL_PARTITION "; then " \
+			"bcb set recovery recovery:--fastboot:;" \
+			"bcb set command boot-recovery;" \
+			"bcb store;" \
+	"else " \
+		"echo Warning: BCB is corrupted or does not exist; " \
+	"fi;\0"
+#define ANDROIDBOOT_RECOVERY_CMD "androidboot_recovery=" \
+	"if bcb load " __stringify(CONFIG_FASTBOOT_FLASH_MMC_DEV) " " \
+		CONTROL_PARTITION "; then " \
+			"bcb set recovery recovery:--recovery:;" \
+			"bcb set command boot-recovery;" \
+			"bcb store;" \
+	"else " \
+		"echo Warning: BCB is corrupted or does not exist; " \
+	"fi;\0"
+#else
+#define ANDROIDBOOT_FASTBOOTD_CMD ""
+#define ANDROIDBOOT_RECOVERY_CMD ""
+#endif
+
+#if defined(CONFIG_CMD_AVB)
+#define AVB_VERIFY_CHECK "if test \"${force_avb}\" -eq 1; then " \
+				"if run avb_verify; then " \
+					"echo AVB verification OK.;" \
+					"setenv bootargs \"$bootargs $avb_bootargs\";" \
+				"else " \
+					"echo AVB verification failed.;" \
+				"exit; fi;" \
+			"else " \
+				"echo Running without AVB...; "\
+			"fi;"
+
+#define AVB_VERIFY_CMD "avb_verify=avb init ${mmcdev}; avb verify;\0"
+#else
+#define AVB_VERIFY_CHECK ""
+#define AVB_VERIFY_CMD ""
+#endif
+
+ #define BOOTENV_DEV_FASTBOOT(devtypeu, devtypel, instance) \
 	"bootcmd_fastboot=" \
 		"sm reboot_reason reason;" \
-		"setenv run_fastboot 0;" \
 		"if test \"${boot_source}\" = \"usb\"; then " \
 			"echo Fastboot forced by usb rom boot;" \
 			"setenv run_fastboot 1;" \
@@ -26,8 +71,17 @@
 			"echo Broken MMC partition scheme;" \
 			"setenv run_fastboot 1;" \
 		"fi;" \
-		"if test \"${reason}\" = \"bootloader\" -o " \
-			"\"${reason}\" = \"fastboot\"; then " \
+		"if test \"${reason}\" = fastboot; then " \
+			"echo Fastboot userspace asked by reboot reason;" \
+			"setenv force_recovery 1;" \
+			"if run androidboot_fastbootd; then " \
+				"echo BCB set OK.;" \
+			"else " \
+				"echo BCB set failed.;" \
+			"exit; fi;" \
+			"run bootcmd_recovery;" \
+		"fi;" \
+		"if test \"${reason}\" = bootloader; then " \
 			"echo Fastboot asked by reboot reason;" \
 			"setenv run_fastboot 1;" \
 		"fi;" \
@@ -113,6 +167,9 @@
 
 #define CONFIG_EXTRA_ENV_SETTINGS                                     \
 	"partitions=" PARTS_DEFAULT "\0"                              \
+	AVB_VERIFY_CMD                                                \
+	ANDROIDBOOT_FASTBOOTD_CMD                                     \
+	ANDROIDBOOT_RECOVERY_CMD                                      \
 	"mmcdev=2\0"                                                  \
 	"bootpart=1\0"                                                \
 	"logopart=2\0"                                                \
