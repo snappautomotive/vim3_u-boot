@@ -12,6 +12,9 @@
 #define CONFIG_SYS_MMC_ENV_DEV	2
 #define CONFIG_SYS_MMC_ENV_PART	1
 
+#ifndef CONTROL_PARTITION
+#define CONTROL_PARTITION "misc"
+#endif
 
 #ifndef BOOT_PARTITION
 #define BOOT_PARTITION "boot"
@@ -54,7 +57,7 @@
 				"echo Running without AVB...; "\
 			"fi;"
 
-#define AVB_VERIFY_CMD "avb_verify=avb init ${mmcdev}; avb verify;\0"
+#define AVB_VERIFY_CMD "avb_verify=avb init ${mmcdev}; avb verify $slot_suffix;\0"
 #else
 #define AVB_VERIFY_CHECK ""
 #define AVB_VERIFY_CMD ""
@@ -90,15 +93,58 @@
 #define AB_BOOTARGS " androidboot.force_normal_boot=1"
 #define RECOVERY_PARTITION "boot"
 #else
-#define AB_SELECT_SLOT " "
+#define AB_SELECT_SLOT ""
 #define AB_SELECT_ARGS " "
 #define ANDROIDBOOT_GET_CURRENT_SLOT_CMD ""
 #define AB_BOOTARGS " "
 #define RECOVERY_PARTITION "recovery"
 #endif
 
+#if defined(CONFIG_CMD_ABOOTIMG)
+
+/*
+ * Prepares complete device tree blob for current board (for Android boot).
+ *
+ * Boot image or recovery image should be loaded into $loadaddr prior to running
+ * these commands. The logic of these commnads is next:
+ *
+ *   1. Read correct DTB for current SoC/board from boot image in $loadaddr
+ *      to $fdtaddr
+ *   2. Merge all needed DTBO for current board from 'dtbo' partition into read
+ *      DTB
+ *   3. User should provide $fdtaddr as 3rd argument to 'bootm'
+ */
+#define PREPARE_FDT \
+	"echo Preparing FDT...; " \
+	"if test $board_name = sei610; then " \
+		"echo \"  Reading DTBO partition for sei610...\"; " \
+		"setenv dtbo_index 0;" \
+	"elif test $board_name = vim3l; then " \
+		"echo \"  Reading DTBO partition for sei610...\"; " \
+		"setenv dtbo_index 1;" \
+	"else " \
+		"echo Error: Android boot is not supported for $board_name; " \
+		"exit; " \
+	"fi; " \
+	"part start mmc ${mmcdev} dtbo${slot_suffix} p_dtbo_start; " \
+	"part size mmc ${mmcdev} dtbo${slot_suffix} p_dtbo_size; " \
+	"mmc read ${dtboaddr} ${p_dtbo_start} ${p_dtbo_size}; " \
+	"echo \"  Reading DTB for Amlogic SM1 ...\"; " \
+	"abootimg get dtb --index=0 dtb_start dtb_size; " \
+	"cp.b $dtb_start $fdt_addr_r $dtb_size; " \
+	"fdt addr $fdt_addr_r 0x80000; " \
+	"echo \"  Applying DTBOs...\"; " \
+	"adtimg addr $dtboaddr; " \
+	"adtimg get dt --index=$dtbo_index dtbo0_addr; " \
+	"fdt apply $dtbo0_addr;" \
+
+#else
+#define PREPARE_FDT " "
+#endif
+
 #define BOOTENV_DEV_FASTBOOT(devtypeu, devtypel, instance) \
 	"bootcmd_fastboot=" \
+		"setenv run_fastboot 0;" \
 		"sm reboot_reason reason;" \
 		"if test \"${boot_source}\" = \"usb\"; then " \
 			"echo Fastboot forced by usb rom boot;" \
@@ -123,18 +169,19 @@
 			"echo Fastboot asked by reboot reason;" \
 			"setenv run_fastboot 1;" \
 		"fi;" \
-		"if test \"${skip_fastboot}\" -eq 1; then " \
-			"echo Fastboot skipped by environment;" \
-			"setenv run_fastboot 0;" \
-		"fi;" \
-		"if test \"${force_fastboot}\" -eq 1; then " \
-			"echo Fastboot forced by environment;" \
-			"setenv run_fastboot 1;" \
+		"if bcb load " __stringify(CONFIG_FASTBOOT_FLASH_MMC_DEV) " " \
+		CONTROL_PARTITION "; then " \
+			"if bcb test command = bootonce-bootloader; then " \
+				"echo BCB: Bootloader boot...; " \
+				"bcb clear command; bcb store; " \
+				"setenv run_fastboot 1;" \
+			"fi; " \
+		"else " \
+			"echo Warning: BCB is corrupted or does not exist; " \
 		"fi;" \
 		"if test \"${run_fastboot}\" -eq 1; then " \
-			"echo Running Fastboot...;" \
-			"fastboot 0;" \
-		"fi\0"
+			"fastboot " __stringify(CONFIG_FASTBOOT_USB_DEV) "; " \
+		"fi;\0"
 
 #define BOOTENV_DEV_NAME_FASTBOOT(devtypeu, devtypel, instance)	\
 		"fastboot "
@@ -144,15 +191,24 @@
 	"bootcmd_recovery=" \
 		"pinmux dev pinctrl@14;" \
 		"pinmux dev pinctrl@40;" \
-		"sm reboot_reason reason;" \
 		"setenv run_recovery 0;" \
+		"sm reboot_reason reason;" \
 		"if run check_button; then " \
 			"echo Recovery button is pressed;" \
 			"setenv run_recovery 1;" \
-		"elif test \"${reason}\" = \"recovery\" -o " \
-			  "\"${reason}\" = \"update\"; then " \
-			"echo Recovery asked by reboot reason;" \
-			"setenv run_recovery 1;" \
+		"fi; " \
+		"if bcb load " __stringify(CONFIG_FASTBOOT_FLASH_MMC_DEV) " " \
+		CONTROL_PARTITION "; then " \
+			"if bcb test command = boot-recovery; then " \
+				"echo BCB: Recovery boot...; " \
+				"setenv run_recovery 1;" \
+			"fi;" \
+		"else " \
+			"if test \"${reason}\" = \"bootloader\" -o " \
+				"\"${reason}\" = \"recovery\"; then " \
+				"echo Recovery asked by reboot reason;" \
+				"setenv run_recovery 1;" \
+			"fi;" \
 		"fi;" \
 		"if test \"${skip_recovery}\" -eq 1; then " \
 			"echo Recovery skipped by environment;" \
@@ -165,15 +221,16 @@
 		"if test \"${run_recovery}\" -eq 1; then " \
 			"echo Running Recovery...;" \
 			"mmc dev ${mmcdev};" \
-			"setenv bootargs  \"${bootargs} androidboot.serialno=${serial#}\" ;" \
 			AB_SELECT_SLOT \
 			AVB_VERIFY_CHECK \
 			AB_SELECT_ARGS \
 			"part start mmc ${mmcdev} " RECOVERY_PARTITION "${slot_suffix} boot_start;" \
 			"part size mmc ${mmcdev} " RECOVERY_PARTITION "${slot_suffix} boot_size;" \
 			"if mmc read ${loadaddr} ${boot_start} ${boot_size}; then " \
+				PREPARE_FDT \
 				"echo Running Android Recovery...;" \
-				"bootm ${loadaddr};" \
+				"setenv bootargs \"${bootargs} " AB_BOOTARGS " androidboot.serialno=${serial#}\"  ; " \
+				"bootm ${loadaddr} ${loadaddr} ${fdt_addr_r};" \
 			"fi;" \
 			"echo Failed to boot Android...;" \
 			"reset;" \
@@ -184,7 +241,7 @@
 
 #define BOOTENV_DEV_SYSTEM(devtypeu, devtypel, instance) \
 	"bootcmd_system=" \
-		"echo Loading Android boot partition...;" \
+		"echo Loading Android " BOOT_PARTITION " partition...;" \
 		"mmc dev ${mmcdev};" \
 		AB_SELECT_SLOT \
 		AVB_VERIFY_CHECK \
@@ -192,12 +249,15 @@
 		"part start mmc ${mmcdev} " BOOT_PARTITION "${slot_suffix} boot_start;" \
 		"part size mmc ${mmcdev} " BOOT_PARTITION "${slot_suffix} boot_size;" \
 		"if mmc read ${loadaddr} ${boot_start} ${boot_size}; then " \
+			PREPARE_FDT \
 			"setenv bootargs \"${bootargs} " AB_BOOTARGS " androidboot.serialno=${serial#}\"  ; " \
 			"echo Running Android...;" \
-			"bootm ${loadaddr};" \
+			"bootm ${loadaddr} ${loadaddr} ${fdt_addr_r};" \
 		"fi;" \
 		"echo Failed to boot Android...;" \
 		"reset\0"
+
+
 
 #define BOOTENV_DEV_NAME_SYSTEM(devtypeu, devtypel, instance)	\
 		"system "
@@ -225,17 +285,17 @@
 	ANDROIDBOOT_RECOVERY_CMD                                      \
 	ANDROIDBOOT_GET_CURRENT_SLOT_CMD                              \
 	"mmcdev=2\0"                                                  \
-	"bootpart=1\0"                                                \
-	"logopart=2\0"                                                \
+	"logopart=1\0"                                                \
+	"force_avb=0\0"                                               \
 	"gpio_recovery=88\0"                                          \
 	"check_button=gpio input ${gpio_recovery};test $? -eq 0;\0"   \
 	"load_logo=" PREBOOT_LOAD_LOGO "\0"			      \
-	"console=/dev/ttyAML0\0"                                      \
-	"bootargs=no_console_suspend\0"                               \
+	"console=ttyAML0\0"                                      \
 	"stdin=" STDIN_CFG "\0"                                       \
 	"stdout=" STDOUT_CFG "\0"                                     \
 	"stderr=" STDOUT_CFG "\0"                                     \
-	"loadaddr=0x01000000\0"                                       \
+	"dtboaddr=0x08200000\0"                                       \
+	"loadaddr=0x01080000\0"                                       \
 	"fdt_addr_r=0x01000000\0"                                     \
 	"scriptaddr=0x08000000\0"                                     \
 	"kernel_addr_r=0x01080000\0"                                  \
