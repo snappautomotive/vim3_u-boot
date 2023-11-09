@@ -21,10 +21,10 @@
 	"name=dtbo_b,size=8M,uuid=${uuid_gpt_dtbo_b};" \
 	"name=vbmeta_a,size=512K,uuid=${uuid_gpt_vbmeta_a};" \
 	"name=vbmeta_b,size=512K,uuid=${uuid_gpt_vbmeta_b};" \
-	"name=boot_a,size=32M,bootable,uuid=${uuid_gpt_boot_a};" \
-	"name=boot_b,size=32M,bootable,uuid=${uuid_gpt_boot_b};" \
+	"name=boot_a,size=64M,bootable,uuid=${uuid_gpt_boot_a};" \
+	"name=boot_b,size=64M,bootable,uuid=${uuid_gpt_boot_b};" \
 	"name=super,size=3072M,uuid=${uuid_gpt_super};" \
-	"name=userdata,size=11282M,uuid=${uuid_gpt_userdata};" \
+	"name=userdata,size=11218M,uuid=${uuid_gpt_userdata};" \
 	"name=rootfs,size=-,uuid=" ROOT_UUID
 #else
 #define PARTS_DEFAULT \
